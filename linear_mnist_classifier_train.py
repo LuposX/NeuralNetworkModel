@@ -9,16 +9,16 @@ import torch.nn as nn
 
 import pytorch_lightning as pl
 from pytorch_lightning import loggers
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from PIL import Image
 
 
 class CNN(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, batch_size, lr):
         super().__init__()
-
-        self.test_correct_counter = 0
-        self.test_total_counter = 0
+        self.batch_size = batch_size
+        self.lr = lr
 
         self.val_correct_counter = 0
         self.val_total_counter = 0
@@ -41,8 +41,8 @@ class CNN(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
 
-        predicted_label = self.forward(x)
-        loss = self.cross_entropy_loss(predicted_label, y)
+        predicted = self.forward(x)
+        loss = self.cross_entropy_loss(predicted, y)
 
         logs = {"train_loss": loss}
         return {"loss": loss, "log": logs}
@@ -53,11 +53,16 @@ class CNN(pl.LightningModule):
         predicted = self.forward(x)
         loss = self.cross_entropy_loss(predicted, y)
 
+        comet_logger.experiment.log_confusion_matrix(labels=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+                                                     y_true=torch.eye(10)[y].view(-1, 10),
+                                                     y_predicted=predicted
+                                                     )
+
         self.val_correct_counter += int((torch.argmax(predicted, 1).flatten() == y).sum())
         self.val_total_counter += y.size(0)
 
         logs = {"val_loss": loss}
-        return {"val_loss": loss, "logs": logs}
+        return {"val_loss": loss, "log": logs}
 
 
     def validation_epoch_end(self, outputs):
@@ -118,7 +123,7 @@ class CNN(pl.LightningModule):
 
     def train_dataloader(self):
         mnist_train_loader = torch.utils.data.DataLoader(self.mnist_train,
-                                                         batch_size=128 * 4,
+                                                         batch_size=self.batch_size,
                                                          num_workers=1,
                                                          shuffle=True)
 
@@ -126,7 +131,7 @@ class CNN(pl.LightningModule):
 
     def val_dataloader(self):
         mnist_val_loader = torch.utils.data.DataLoader(self.mnist_val,
-                                                         batch_size=128 * 4,
+                                                         batch_size=self.batch_size,
                                                          num_workers=1,
                                                          shuffle=True)
 
@@ -134,20 +139,48 @@ class CNN(pl.LightningModule):
 
     def test_dataloader(self):
         mnist_test_loader = torch.utils.data.DataLoader(self.mnist_test,
-                                                       batch_size=128 * 4,
+                                                       batch_size=self.batch_size,
                                                        num_workers=1,
                                                        shuffle=True)
 
         return mnist_test_loader
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters())
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 
 if __name__ == "__main__":
     # net = CNN.load_from_checkpoint("tb_logs/NN_08_03_20/linear_nn_for_mnist/checkpoints/epoch=4.ckpt")
 
-    net = CNN()
+    # Parameters
+    experiment_name = "linear_0"
+    code_file_name = "linear_mnist_classifier_train.py"
+    dataset_name = "MNIST"
+    tags = ["linear", "real_run"]
+    lr = 0.001
+    batch_size = 128*4
 
-    trainer = pl.Trainer()
+    # Loggers
+    tb_tube_logger = loggers.TestTubeLogger("tb_logs", name=experiment_name)
+
+    comet_logger = loggers.CometLogger(
+        api_key=os.environ["COMET_KEY"],
+        rest_api_key=os.environ["COMET_REST_KEY"],
+        project_name="mnist-classifier",
+        experiment_name=experiment_name,
+    )
+
+    # Neural Network
+    net = CNN(batch_size, lr)
+
+    # Init stuff
+    comet_logger.experiment.set_code(open(code_file_name, "r").read(), overwrite=True)
+    comet_logger.experiment.set_model_graph(str(net))
+    comet_logger.experiment.add_tags(tags=tags)
+    comet_logger.experiment.log_dataset_info(name=dataset_name)
+    comet_logger.experiment.log_parameter(name="learning_rate", value=lr)
+    comet_logger.experiment.log_parameter(name="batch_size", value=batch_size)
+
+    # Training the NN
+    trainer = pl.Trainer(val_check_interval=0.5, max_epochs=20, logger=[comet_logger, tb_tube_logger])
     trainer.fit(net)
