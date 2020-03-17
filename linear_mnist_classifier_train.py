@@ -155,14 +155,15 @@ if __name__ == "__main__":
     # Parameters
     experiment_name = "linear_0"
     code_file_name = "linear_mnist_classifier_train.py"
+    checkpoint_folder = "./" + experiment_name + "_checkpoints/"
     dataset_name = "MNIST"
     tags = ["linear", "real_run"]
+
+    # Hyperparameters
     lr = 0.001
     batch_size = 128*4
 
     # Loggers
-    tb_tube_logger = loggers.TestTubeLogger("tb_logs", name=experiment_name)
-
     comet_logger = loggers.CometLogger(
         api_key=os.environ["COMET_KEY"],
         rest_api_key=os.environ["COMET_REST_KEY"],
@@ -182,5 +183,12 @@ if __name__ == "__main__":
     comet_logger.experiment.log_parameter(name="batch_size", value=batch_size)
 
     # Training the NN
-    trainer = pl.Trainer(val_check_interval=0.5, max_epochs=20, logger=[comet_logger, tb_tube_logger])
+    checkpoint_callback = ModelCheckpoint(filepath=checkpoint_folder, save_top_k=3)
+    trainer = pl.Trainer(val_check_interval=0.5,
+                         checkpoint_callback=checkpoint_callback,
+                         max_epochs=20,
+                         logger=comet_logger)
     trainer.fit(net)
+
+    # log checkpoints
+    comet_logger.experiment.log_asset_folder(folder=checkpoint_folder)
