@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     # Training the NN
     checkpoint_callback = ModelCheckpoint(filepath=checkpoint_folder, save_top_k=3)
-    trainer = pl.Trainer(fast_dev_run=True,
+    trainer = pl.Trainer(# fast_dev_run=True,
                          checkpoint_callback=checkpoint_callback,
                          val_check_interval=0.5,
                          max_epochs=20,
@@ -218,4 +218,3 @@ if __name__ == "__main__":
 
     # log checkpoints
     comet_logger.experiment.log_asset_folder(folder=checkpoint_folder)
-
